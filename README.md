@@ -6,6 +6,9 @@ A free, privacy-first web app that helps students track their wellbeing using AI
 
 ---
 
+!!! This project was created to participate the Build4Student Hackathon at DevPost !!!
+https://devpost.com/software/student-mood-tracker
+
 ## ✨ Key Features
 
 - **100% Anonymous** - No names or personal data collected
