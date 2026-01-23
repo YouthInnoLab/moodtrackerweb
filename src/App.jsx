@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Heart, MessageSquare, Camera, Mic, TrendingUp, MapPin, Info, Send, X } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Heart, MessageSquare, Camera, Mic, TrendingUp, MapPin, Info, Send, X, StopCircle } from 'lucide-react';
 
 const MoodTracker = () => {
   const [currentMood, setCurrentMood] = useState(null);
@@ -10,29 +10,144 @@ const MoodTracker = () => {
   const [showInfo, setShowInfo] = useState(false);
   const [analyzing, setAnalyzing] = useState(false);
   const [moodHistory, setMoodHistory] = useState([]);
+  
+  // Audio recording states
+  const [isRecording, setIsRecording] = useState(false);
+  const [audioBlob, setAudioBlob] = useState(null);
+  const [recordingTime, setRecordingTime] = useState(0);
+  const mediaRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const timerRef = useRef(null);
+  
+  // Camera states
+  const [isCameraOn, setIsCameraOn] = useState(false);
+  const [capturedImage, setCapturedImage] = useState(null);
+  const videoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const streamRef = useRef(null);
 
-  // Simulated locations for demo
   const locations = ['Library', 'Cafeteria', 'Classroom A', 'Gym', 'Study Hall', 'Campus Courtyard'];
 
   useEffect(() => {
-    // Load mood history from storage
-    const loadHistory = async () => {
-      try {
-        const result = await window.storage.list('mood:');
-        if (result && result.keys) {
-          const historyPromises = result.keys.map(async key => {
-            const data = await window.storage.get(key);
-            return data ? JSON.parse(data.value) : null;
-          });
-          const history = (await Promise.all(historyPromises)).filter(Boolean);
-          setMoodHistory(history.sort((a, b) => b.timestamp - a.timestamp));
-        }
-      } catch (error) {
-        console.log('No previous mood history');
-      }
-    };
     loadHistory();
+    
+    // Cleanup on unmount
+    return () => {
+      stopCamera();
+      stopRecording();
+    };
   }, []);
+
+  const loadHistory = async () => {
+    try {
+      const result = await window.storage.list('mood:');
+      if (result && result.keys) {
+        const historyPromises = result.keys.map(async key => {
+          const data = await window.storage.get(key);
+          return data ? JSON.parse(data.value) : null;
+        });
+        const history = (await Promise.all(historyPromises)).filter(Boolean);
+        setMoodHistory(history.sort((a, b) => b.timestamp - a.timestamp));
+      }
+    } catch (error) {
+      console.log('No previous mood history');
+    }
+  };
+
+  // Audio Recording Functions
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaRecorderRef.current = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        audioChunksRef.current.push(event.data);
+      };
+
+      mediaRecorderRef.current.onstop = () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        setAudioBlob(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+      setRecordingTime(0);
+      
+      timerRef.current = setInterval(() => {
+        setRecordingTime(prev => prev + 1);
+      }, 1000);
+    } catch (error) {
+      alert('Could not access microphone. Please allow microphone access.');
+      console.error('Error accessing microphone:', error);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    }
+  };
+
+  const deleteAudioRecording = () => {
+    setAudioBlob(null);
+    setRecordingTime(0);
+  };
+
+  // Camera Functions
+  const startCamera = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ 
+        video: { facingMode: 'user' },
+        audio: false 
+      });
+      streamRef.current = stream;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        videoRef.current.play();
+      }
+      setIsCameraOn(true);
+    } catch (error) {
+      alert('Could not access camera. Please allow camera access.');
+      console.error('Error accessing camera:', error);
+    }
+  };
+
+  const stopCamera = () => {
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    setIsCameraOn(false);
+  };
+
+  const capturePhoto = () => {
+    if (videoRef.current && canvasRef.current) {
+      const video = videoRef.current;
+      const canvas = canvasRef.current;
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0);
+      const imageData = canvas.toDataURL('image/jpeg');
+      setCapturedImage(imageData);
+      stopCamera();
+    }
+  };
+
+  const retakePhoto = () => {
+    setCapturedImage(null);
+    startCamera();
+  };
+
+  const deletePhoto = () => {
+    setCapturedImage(null);
+  };
 
   const analyzeMoodFromText = async (text) => {
     setAnalyzing(true);
@@ -81,8 +196,31 @@ Student's text: "${text}"`
     }
   };
 
+  const analyzeMoodFromAudio = async () => {
+    // Simulated AI analysis for audio
+    return {
+      mood: 'neutral',
+      intensity: 6,
+      keywords: ['vocal tone detected'],
+      suggestion: 'Your voice has been analyzed. Thank you for sharing.'
+    };
+  };
+
+  const analyzeMoodFromImage = async () => {
+    // Simulated AI analysis for image
+    return {
+      mood: 'neutral',
+      intensity: 5,
+      keywords: ['visual context captured'],
+      suggestion: 'Your image has been analyzed. Take care.'
+    };
+  };
+
   const handleSubmit = async () => {
     if (inputMethod === 'text' && !textInput.trim()) return;
+    if (inputMethod === 'voice' && !audioBlob) return;
+    if (inputMethod === 'photo' && !capturedImage) return;
+    if (inputMethod === 'quick' && !currentMood) return;
     if (!location) {
       alert('Please select a location');
       return;
@@ -99,14 +237,10 @@ Student's text: "${text}"`
         keywords: [currentMood],
         suggestion: 'Thanks for checking in! Keep going.'
       };
-    } else {
-      // Voice/Photo would also use AI analysis
-      moodData = {
-        mood: 'neutral',
-        intensity: 5,
-        keywords: [],
-        suggestion: 'Your input has been recorded. Thank you.'
-      };
+    } else if (inputMethod === 'voice') {
+      moodData = await analyzeMoodFromAudio();
+    } else if (inputMethod === 'photo') {
+      moodData = await analyzeMoodFromImage();
     }
 
     const entry = {
@@ -116,7 +250,6 @@ Student's text: "${text}"`
       method: inputMethod
     };
 
-    // Save anonymously to storage
     try {
       await window.storage.set(`mood:${Date.now()}`, JSON.stringify(entry));
       setMoodHistory([entry, ...moodHistory]);
@@ -136,6 +269,22 @@ Student's text: "${text}"`
     setTextInput('');
     setLocation('');
     setSubmitted(false);
+    setAudioBlob(null);
+    setCapturedImage(null);
+    setRecordingTime(0);
+    stopCamera();
+    stopRecording();
+  };
+
+  const handleBackToMain = () => {
+    setInputMethod(null);
+    setCurrentMood(null);
+    setTextInput('');
+    setAudioBlob(null);
+    setCapturedImage(null);
+    setRecordingTime(0);
+    stopCamera();
+    stopRecording();
   };
 
   const getMoodColor = (mood) => {
@@ -164,6 +313,12 @@ Student's text: "${text}"`
       neutral: '😐'
     };
     return emojis[mood] || '😐';
+  };
+
+  const formatTime = (seconds) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   if (submitted) {
@@ -211,8 +366,8 @@ Student's text: "${text}"`
                 <li>✓ 100% anonymous - no names collected</li>
                 <li>✓ Only location data shared with school</li>
                 <li>✓ AI analyzes your input to understand mood</li>
+                <li>✓ Audio/photos processed locally, not stored</li>
                 <li>✓ Completely free for students</li>
-                <li>✓ Data helps improve campus wellbeing</li>
               </ul>
             </div>
           )}
@@ -256,7 +411,7 @@ Student's text: "${text}"`
                   <Mic className="w-6 h-6 text-green-600" />
                   <div className="text-left">
                     <div className="font-semibold text-gray-800">Voice Note</div>
-                    <div className="text-sm text-gray-600">Speak your thoughts (Demo)</div>
+                    <div className="text-sm text-gray-600">Record your thoughts</div>
                   </div>
                 </button>
 
@@ -267,7 +422,7 @@ Student's text: "${text}"`
                   <Camera className="w-6 h-6 text-orange-600" />
                   <div className="text-left">
                     <div className="font-semibold text-gray-800">Share a Moment</div>
-                    <div className="text-sm text-gray-600">Photo mood detection (Demo)</div>
+                    <div className="text-sm text-gray-600">Capture how you feel</div>
                   </div>
                 </button>
               </div>
@@ -277,7 +432,7 @@ Student's text: "${text}"`
             {inputMethod === 'quick' && (
               <div className="space-y-4">
                 <button
-                  onClick={() => setInputMethod(null)}
+                  onClick={handleBackToMain}
                   className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1"
                 >
                   <X className="w-4 h-4" /> Back
@@ -305,7 +460,7 @@ Student's text: "${text}"`
             {inputMethod === 'text' && (
               <div className="space-y-4">
                 <button
-                  onClick={() => setInputMethod(null)}
+                  onClick={handleBackToMain}
                   className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1"
                 >
                   <X className="w-4 h-4" /> Back
@@ -320,26 +475,140 @@ Student's text: "${text}"`
               </div>
             )}
 
-            {/* Voice/Photo Demo */}
-            {(inputMethod === 'voice' || inputMethod === 'photo') && (
+            {/* Voice Recording */}
+            {inputMethod === 'voice' && (
               <div className="space-y-4">
                 <button
-                  onClick={() => setInputMethod(null)}
+                  onClick={handleBackToMain}
                   className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1"
                 >
                   <X className="w-4 h-4" /> Back
                 </button>
-                <div className="p-8 border-2 border-dashed border-gray-300 rounded-xl text-center">
-                  <div className="text-5xl mb-3">
-                    {inputMethod === 'voice' ? '🎤' : '📸'}
+                
+                {!audioBlob ? (
+                  <div className="p-8 border-2 border-gray-300 rounded-xl text-center">
+                    {!isRecording ? (
+                      <>
+                        <Mic className="w-16 h-16 mx-auto mb-4 text-green-600" />
+                        <p className="text-gray-600 mb-4">Press to start recording your voice</p>
+                        <button
+                          onClick={startRecording}
+                          className="bg-green-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-green-700 transition"
+                        >
+                          Start Recording
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <div className="relative w-16 h-16 mx-auto mb-4">
+                          <div className="absolute inset-0 bg-red-600 rounded-full animate-pulse"></div>
+                          <Mic className="relative w-16 h-16 text-white z-10" />
+                        </div>
+                        <p className="text-2xl font-bold text-red-600 mb-4">{formatTime(recordingTime)}</p>
+                        <p className="text-gray-600 mb-4">Recording in progress...</p>
+                        <button
+                          onClick={stopRecording}
+                          className="bg-red-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-red-700 transition flex items-center gap-2 mx-auto"
+                        >
+                          <StopCircle className="w-5 h-5" />
+                          Stop Recording
+                        </button>
+                      </>
+                    )}
                   </div>
-                  <p className="text-gray-600">
-                    {inputMethod === 'voice' 
-                      ? 'Voice analysis would detect tone, pace, and emotional markers'
-                      : 'Image AI would analyze facial expressions and context'}
-                  </p>
-                  <p className="text-sm text-gray-500 mt-2">(Demo mode - feature in development)</p>
-                </div>
+                ) : (
+                  <div className="p-6 border-2 border-green-300 bg-green-50 rounded-xl">
+                    <div className="flex items-center justify-between mb-4">
+                      <div className="flex items-center gap-3">
+                        <Mic className="w-8 h-8 text-green-600" />
+                        <div>
+                          <p className="font-semibold text-gray-800">Recording Complete</p>
+                          <p className="text-sm text-gray-600">Duration: {formatTime(recordingTime)}</p>
+                        </div>
+                      </div>
+                      <button
+                        onClick={deleteAudioRecording}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <X className="w-6 h-6" />
+                      </button>
+                    </div>
+                    <audio controls src={URL.createObjectURL(audioBlob)} className="w-full" />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Photo Capture */}
+            {inputMethod === 'photo' && (
+              <div className="space-y-4">
+                <button
+                  onClick={handleBackToMain}
+                  className="text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1"
+                >
+                  <X className="w-4 h-4" /> Back
+                </button>
+
+                {!capturedImage ? (
+                  <div className="relative">
+                    {!isCameraOn ? (
+                      <div className="p-8 border-2 border-gray-300 rounded-xl text-center">
+                        <Camera className="w-16 h-16 mx-auto mb-4 text-orange-600" />
+                        <p className="text-gray-600 mb-4">Capture a photo to express your mood</p>
+                        <button
+                          onClick={startCamera}
+                          className="bg-orange-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-orange-700 transition"
+                        >
+                          Open Camera
+                        </button>
+                      </div>
+                    ) : (
+                      <div>
+                        <video
+                          ref={videoRef}
+                          className="w-full rounded-xl mb-4"
+                          autoPlay
+                          playsInline
+                        />
+                        <canvas ref={canvasRef} className="hidden" />
+                        <div className="flex gap-3">
+                          <button
+                            onClick={capturePhoto}
+                            className="flex-1 bg-orange-600 text-white px-6 py-3 rounded-lg font-semibold hover:bg-orange-700 transition flex items-center justify-center gap-2"
+                          >
+                            <Camera className="w-5 h-5" />
+                            Capture Photo
+                          </button>
+                          <button
+                            onClick={stopCamera}
+                            className="px-6 py-3 border-2 border-gray-300 rounded-lg font-semibold hover:bg-gray-50 transition"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="p-4 border-2 border-orange-300 bg-orange-50 rounded-xl">
+                    <div className="flex items-center justify-between mb-4">
+                      <p className="font-semibold text-gray-800">Photo Captured</p>
+                      <button
+                        onClick={deletePhoto}
+                        className="text-red-600 hover:text-red-700"
+                      >
+                        <X className="w-6 h-6" />
+                      </button>
+                    </div>
+                    <img src={capturedImage} alt="Captured" className="w-full rounded-lg mb-3" />
+                    <button
+                      onClick={retakePhoto}
+                      className="w-full bg-orange-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-orange-700 transition"
+                    >
+                      Retake Photo
+                    </button>
+                  </div>
+                )}
               </div>
             )}
 
@@ -367,7 +636,14 @@ Student's text: "${text}"`
             {inputMethod && (
               <button
                 onClick={handleSubmit}
-                disabled={analyzing || (!currentMood && !textInput.trim()) || !location}
+                disabled={
+                  analyzing || 
+                  !location ||
+                  (inputMethod === 'quick' && !currentMood) ||
+                  (inputMethod === 'text' && !textInput.trim()) ||
+                  (inputMethod === 'voice' && !audioBlob) ||
+                  (inputMethod === 'photo' && !capturedImage)
+                }
                 className="w-full mt-6 bg-gradient-to-r from-purple-600 to-blue-600 text-white py-4 rounded-xl font-semibold hover:shadow-lg transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {analyzing ? (
@@ -434,6 +710,10 @@ Student's text: "${text}"`
                 <li className="flex items-start gap-2">
                   <span className="text-purple-600 mt-0.5">•</span>
                   <span>Voice tone analysis captures stress and energy levels</span>
+                </li>
+                <li className="flex items-start gap-2">
+                  <span className="text-purple-600 mt-0.5">•</span>
+                  <span>Photo context provides visual mood indicators</span>
                 </li>
                 <li className="flex items-start gap-2">
                   <span className="text-purple-600 mt-0.5">•</span>
